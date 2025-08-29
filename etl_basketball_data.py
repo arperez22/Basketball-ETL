@@ -164,5 +164,12 @@ def transform_wiki_data():
     wiki_data['Conference'] = wiki_data['Conference'].str.replace(r'\bConference\b', '',regex=True).str.strip()
 
     wiki_data['Nickname'] = wiki_data['Nickname'].apply(clean_column)
+
+    wiki_data['Record'] = wiki_data['Record'].str.replace('\u2013', '-').str.strip()
+    wiki_data[['Wins', 'Losses', 'Conference Wins', 'Conference Losses']] = wiki_data['Record'].str.extract(r'(\d+)-(\d+)\s+\((\d+)-(\d+)[^)]*\)').astype(int)
+    wiki_data = wiki_data[[
+        "Team", "Record", "Wins", "Losses", "Conference Wins", "Conference Losses",
+        "University", "Coach", "Conference", "Location", "Nickname"
+    ]]
     
     wiki_data.to_csv('data/updated_teams_data.csv', index=False)
