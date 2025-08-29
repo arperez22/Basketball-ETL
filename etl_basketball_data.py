@@ -2,9 +2,15 @@ import requests
 from bs4 import BeautifulSoup
 from time import sleep
 import pandas as pd
+import regex as re
 
 
 def extract_data():
+    extract_sports_reference_data()
+    extract_wiki_data()
+
+
+def extract_sports_reference_data():
     team_roster_info = []
     team_stats_info = []
 
@@ -50,7 +56,69 @@ def extract_data():
     stats_df.to_csv('data/team_stats.csv', index=False)
 
 
+def extract_wiki_data():
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyBasketballETLBot/1.0; +https://github.com/arperez22/Basketball-ETL)"}
+    first_four_losers = set(['Texas', 'San Diego State', 'Saint Francis', 'American'])
+    teams_data = []
+
+    wiki_url = 'https://en.wikipedia.org/wiki/2025_NCAA_Division_I_men%27s_basketball_tournament'
+    wiki_html = requests.get(wiki_url, headers=headers).text
+    wiki_soup = BeautifulSoup(wiki_html, 'lxml')
+    tables = wiki_soup.find_all('table')
+
+    tags = [tag for table in tables[6:10] for tag in table.find_all('a')]
+    team_links_to_names = {tag.get('href'): tag.text.strip() for tag in tags if 'basketball_team' in tag.get('href') and tag.text.strip() not in first_four_losers}
+    team_links_to_names = {f"https://en.wikipedia.org/api/rest_v1/page/html/{href.lstrip('./wiki')}": text for href, text in team_links_to_names.items()}
+
+    for team_season_url, team_name in team_links_to_names.items():
+        try:
+            team_season_html = requests.get(team_season_url, headers=headers).text
+            team_season_soup = BeautifulSoup(team_season_html, 'lxml')
+            record_th = team_season_soup.find('th', text='Record')
+            record_td = record_th.find_next_sibling('td')
+            span = team_season_soup.find('span', class_='vcard attendee fn org')
+            tag = span.find_next('a')
+            team_page_url = f'https://en.wikipedia.org/api/rest_v1/page/html{tag.get("href").lstrip(".")}'
+
+            team_html = requests.get(team_page_url, headers=headers).text
+            team_soup = BeautifulSoup(team_html, 'lxml')
+            table = team_soup.find('table', class_='infobox vcard')
+            image_tag = table.find('a', class_='mw-file-description')
+            image_src = image_tag.find('img').get('src')
+            image_link = 'https:' + image_src[0 : image_src.find('.svg') + 4].replace('/thumb', '')
+            image_response = requests.get(image_link, headers=headers)
+
+            with open(f'data/images/{team_name}_logo.svg', 'wb') as f:
+                f.write(image_response.content)
+
+            file_headers = ['Team', 'Record', 'University', 'Head coach', 'Conference', 'Location', 'Nickname']
+            team_data = [team_name, record_td.text.strip()]
+            rows = table.find_all('tr')
+            for row in rows:
+                th = row.find('th')
+                if th and th.text.strip() in file_headers:
+                    print(th.text.strip())
+                    td = th.find_next_sibling('td')
+                    if td:
+                        team_data.append(td.text.strip())
+
+            teams_data.append(team_data)
+            sleep(10)
+
+        except Exception as e:
+            print(f"Error processing {team_name}: {e}")
+
+
+    teams_df = pd.DataFrame(teams_data, columns=file_headers)
+    teams_df.to_csv('data/teams_data.csv', index=False)
+
+
 def transform_data():
+    transform_sports_reference_data()
+    transform_wiki_data()
+
+
+def transform_sports_reference_data():
     roster_data = pd.read_csv('data/team_rosters.csv')
     stats_data = pd.read_csv('data/team_stats.csv')
 
@@ -80,3 +148,21 @@ def transform_data():
 
     roster_data.to_csv('data/updated_roster_data.csv', index=False)
     stats_data.to_csv('data/updated_stats_data.csv', index=False)
+
+
+def transform_wiki_data():
+    wiki_data = pd.read_csv('data/teams_data.csv')
+    wiki_data.sort_values(by='Team', inplace=True)
+    wiki_data.rename(columns={'Head coach': 'Coach'}, inplace=True)
+
+    def clean_column(name):
+        return re.sub(r'\s*\(.*?\).*', '', name)
+
+    wiki_data['Coach'] = wiki_data['Coach'].apply(clean_column)
+    
+    wiki_data['Conference'] = wiki_data['Conference'].apply(clean_column)
+    wiki_data['Conference'] = wiki_data['Conference'].str.replace(r'\bConference\b', '',regex=True).str.strip()
+
+    wiki_data['Nickname'] = wiki_data['Nickname'].apply(clean_column)
+    
+    wiki_data.to_csv('data/updated_teams_data.csv', index=False)
