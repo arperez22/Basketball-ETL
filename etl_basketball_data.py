@@ -1,4 +1,5 @@
 import requests
+import psycopg2
 from bs4 import BeautifulSoup
 from time import sleep
 import pandas as pd
@@ -146,8 +147,8 @@ def transform_sports_reference_data():
 
     roster_data['Player'] = roster_data.apply(update_name, axis=1)
 
-    roster_data.to_csv('data/updated_roster_data.csv', index=False)
-    stats_data.to_csv('data/updated_stats_data.csv', index=False)
+    roster_data.to_csv('data/cleaned_roster_data.csv', index=False)
+    stats_data.to_csv('data/cleaned_stats_data.csv', index=False)
 
 
 def transform_wiki_data():
@@ -172,4 +173,73 @@ def transform_wiki_data():
         "University", "Coach", "Conference", "Location", "Nickname"
     ]]
     
-    wiki_data.to_csv('data/updated_teams_data.csv', index=False)
+    wiki_data.to_csv('data/cleaned_teams_data.csv', index=False)
+
+
+def create_tables(conn):
+    cursor = conn.cursor()
+
+    cursor.execute("""  CREATE TABLE IF NOT EXISTS teams (
+                        team_id             INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        name                VARCHAR(50) NOT NULL UNIQUE,
+                        record              VARCHAR(30) NOT NULL,
+                        wins                INT NOT NULL,
+                        losses              INT NOT NULL,
+                        conference_wins     INT NOT NULL,
+                        conference_losses   INT NOT NULL,
+                        university          VARCHAR(50) NOT NULL,
+                        coach               VARCHAR(50) NOT NULL,
+                        conference          VARCHAR(50) NOT NULL,
+                        location            VARCHAR(50) NOT NULL,
+                        nickname            VARCHAR(50) NOT NULL
+                    ); """)
+    
+    cursor.execute("""  CREATE TABLE IF NOT EXISTS players (
+                        player_id       INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        name            VARCHAR(50) NOT NULL,
+                        jersey_number   INT NOT NULL,
+                        class           VARCHAR(2) NOT NULL,
+                        position        VARCHAR(1) NOT NULL,
+                        height          VARCHAR(10) NULL,
+                        weight          REAL NULL,
+                        hometown        VARCHAR(30) NULL,
+                        high_school     VARCHAR(30) NULL,
+                        team            VARCHAR(50),
+
+                        CONSTRAINT fk_team FOREIGN KEY (team) REFERENCES teams(name) ON DELETE CASCADE
+                    ); """)
+
+    cursor.execute("""  CREATE TABLE IF NOT EXISTS player_stats (
+                        stats_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        player_id INT,
+                        games_played INT,
+                        games_started INT,
+                        minutes_played NUMERIC(3, 1),
+                        field_goals NUMERIC(3, 1),
+                        field_goals_attempted NUMERIC(3, 1),
+                        field_goal_percentage NUMERIC(3, 3) DEFAULT 0,
+                        three_points NUMERIC(3, 1),
+                        three_points_attempted NUMERIC(3, 1),
+                        three_points_percentage NUMERIC(3, 3) DEFAULT 0,
+                        two_points NUMERIC(3, 1),
+                        two_points_attempted NUMERIC(3, 1),
+                        two_points_percentage NUMERIC(3, 3) DEFAULT 0,
+                        effective_field_goal_percentage NUMERIC (3, 3) DEFAULT 0,
+                        free_throws NUMERIC(3, 1),
+                        free_throws_attempted NUMERIC(3, 1),
+                        free_throws_percentage NUMERIC(3, 3) DEFAULT 0,
+                        offensive_rebounds NUMERIC(3, 1),
+                        defensive_rebounds NUMERIC(3, 1),
+                        total_rebounds NUMERIC(3, 1),
+                        assists NUMERIC(3, 1),
+                        steals NUMERIC(3, 1),
+                        blocks NUMERIC(3, 1),
+                        turnovers NUMERIC(3, 1),
+                        personal_fouls NUMERIC(3, 1),
+                        points_per_game NUMERIC(3, 1),
+                   
+                        CONSTRAINT fk_player FOREIGN KEY (player_id) REFERENCES players(player_id)
+                    ); """)    
+
+    conn.commit()
+    cursor.close()
