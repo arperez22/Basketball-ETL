@@ -1,9 +1,29 @@
-from etl_basketball_data import extract_data, transform_data
+import os
+from dotenv import load_dotenv
+import psycopg2
+from etl_basketball_data import run_etl_pipeline
 
 
 def main():
-    extract_data()
-    transform_data()
+    load_dotenv()
+
+    host = os.getenv('DB_HOST')
+    dbname = os.getenv('DB_NAME')
+    user = os.getenv('DB_USER')
+    password = os.getenv('DB_PASSWORD')
+    port = os.getenv('DB_PORT')
+
+    conn = psycopg2.connect(
+        host=host,
+        dbname=dbname,
+        user=user,
+        password=password,
+        port=port
+    )
+
+    run_etl_pipeline(conn)
+
+    conn.close()
 
 
 if __name__ == '__main__':

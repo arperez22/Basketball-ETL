@@ -1,9 +1,14 @@
 import requests
-import psycopg2
 from bs4 import BeautifulSoup
 from time import sleep
 import pandas as pd
 import regex as re
+
+
+def run_etl_pipeline(conn):
+    extract_data()
+    transform_data()
+    load_data(conn)
 
 
 def extract_data():
@@ -120,14 +125,23 @@ def transform_data():
 
 
 def transform_sports_reference_data():
-    roster_data = pd.read_csv('data/team_rosters.csv')
-    stats_data = pd.read_csv('data/team_stats.csv')
+    roster_data = pd.read_csv('data/team_rosters.csv', encoding='utf-8')
+    stats_data = pd.read_csv('data/team_stats.csv', encoding='utf-8')
 
     stats_data = stats_data[stats_data['Player'] != 'Team Totals']
     stats_data.drop(axis=1, columns=['Rk', 'Pos', 'Awards'], inplace=True)
+    stats_data.loc[stats_data['Team'].str.contains('McNeese State', case=False, na=False), 'Team'] = 'McNeese'
+    stats_data.loc[stats_data['Team'].str.contains('UNC', case=False, na=False), 'Team'] = 'North Carolina'
+    stats_data['Team'] = stats_data['Team'].str.replace('-', ' ')
+    stats_data['Team'] = stats_data['Team'].apply(clean_column)
 
     roster_data = roster_data[~roster_data['Summary'].isnull()]
     roster_data.drop(axis=1, columns=['RSCI Top 100', 'Summary'], inplace=True)
+    roster_data.loc[roster_data['Team'].str.contains('McNeese State', case=False, na=False), 'Team'] = 'McNeese'
+    roster_data.loc[roster_data['Team'].str.contains('UNC', case=False, na=False), 'Team'] = 'North Carolina'
+    roster_data['Team'] = roster_data['Team'].str.replace('-', ' ')
+    roster_data['Team'] = roster_data['Team'].apply(clean_column)
+
 
     stats_name_map = {}
     for _, row in stats_data.iterrows():
@@ -147,17 +161,33 @@ def transform_sports_reference_data():
 
     roster_data['Player'] = roster_data.apply(update_name, axis=1)
 
+    def fix_encoding(s):
+        if isinstance(s, str):
+            return s.encode("latin1").decode("utf-8")
+        return s
+
+    roster_data['Player'] = roster_data['Player'].apply(fix_encoding)
+    roster_data['High School'] = roster_data['High School'].apply(fix_encoding)
+    roster_data['Hometown'] = roster_data['Hometown'].apply(fix_encoding)
+
+    roster_data.sort_values(by=['Team', 'Player'], inplace=True)
+    
+    stats_data['Player'] = stats_data['Player'].apply(fix_encoding)
+    stats_data.sort_values(by=['Team', 'Player'], inplace=True)
+
+    stats_data.reset_index(drop=True, inplace=True)
+    stats_data.index.name = 'Player ID'
+    stats_data.index += 1
+    stats_data.drop(columns=['Player', 'Team'], inplace=True)
+
     roster_data.to_csv('data/cleaned_roster_data.csv', index=False)
-    stats_data.to_csv('data/cleaned_stats_data.csv', index=False)
+    stats_data.to_csv('data/cleaned_stats_data.csv')
 
 
 def transform_wiki_data():
-    wiki_data = pd.read_csv('data/teams_data.csv')
+    wiki_data = pd.read_csv('data/teams_data.csv', encoding='utf-8')
     wiki_data.sort_values(by='Team', inplace=True)
     wiki_data.rename(columns={'Head coach': 'Coach'}, inplace=True)
-
-    def clean_column(name):
-        return re.sub(r'\s*\(.*?\).*', '', name)
 
     wiki_data['Coach'] = wiki_data['Coach'].apply(clean_column)
     
@@ -176,13 +206,24 @@ def transform_wiki_data():
     wiki_data.to_csv('data/cleaned_teams_data.csv', index=False)
 
 
+def load_data(conn):
+    create_tables(conn)
+    load_teams(conn)
+    load_players(conn)
+    load_player_stats(conn)
+
+
+def clean_column(name):
+    return re.sub(r'\s*\(.*?\).*', '', name)
+
+
 def create_tables(conn):
     cursor = conn.cursor()
 
     cursor.execute("""  CREATE TABLE IF NOT EXISTS teams (
                         team_id             INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                         name                VARCHAR(50) NOT NULL UNIQUE,
-                        record              VARCHAR(30) NOT NULL,
+                        record              VARCHAR(50) NOT NULL,
                         wins                INT NOT NULL,
                         losses              INT NOT NULL,
                         conference_wins     INT NOT NULL,
@@ -198,12 +239,12 @@ def create_tables(conn):
                         player_id       INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                         name            VARCHAR(50) NOT NULL,
                         jersey_number   INT NOT NULL,
-                        class           VARCHAR(2) NOT NULL,
+                        class           VARCHAR(2) NULL,
                         position        VARCHAR(1) NOT NULL,
                         height          VARCHAR(10) NULL,
                         weight          REAL NULL,
-                        hometown        VARCHAR(30) NULL,
-                        high_school     VARCHAR(30) NULL,
+                        hometown        VARCHAR(150) NULL,
+                        high_school     VARCHAR(150) NULL,
                         team            VARCHAR(50),
 
                         CONSTRAINT fk_team FOREIGN KEY (team) REFERENCES teams(name) ON DELETE CASCADE
@@ -211,23 +252,23 @@ def create_tables(conn):
 
     cursor.execute("""  CREATE TABLE IF NOT EXISTS player_stats (
                         stats_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                        player_id INT,
+                        player_id INT NOT NULL,
                         games_played INT,
                         games_started INT,
                         minutes_played NUMERIC(3, 1),
                         field_goals NUMERIC(3, 1),
                         field_goals_attempted NUMERIC(3, 1),
-                        field_goal_percentage NUMERIC(3, 3) DEFAULT 0,
+                        field_goal_percentage NUMERIC(4, 3) DEFAULT 0,
                         three_points NUMERIC(3, 1),
                         three_points_attempted NUMERIC(3, 1),
-                        three_points_percentage NUMERIC(3, 3) DEFAULT 0,
+                        three_point_percentage NUMERIC(4, 3) DEFAULT 0,
                         two_points NUMERIC(3, 1),
                         two_points_attempted NUMERIC(3, 1),
-                        two_points_percentage NUMERIC(3, 3) DEFAULT 0,
-                        effective_field_goal_percentage NUMERIC (3, 3) DEFAULT 0,
+                        two_point_percentage NUMERIC(4, 3) DEFAULT 0,
+                        effective_field_goal_percentage NUMERIC (4, 3) DEFAULT 0,
                         free_throws NUMERIC(3, 1),
                         free_throws_attempted NUMERIC(3, 1),
-                        free_throws_percentage NUMERIC(3, 3) DEFAULT 0,
+                        free_throws_percentage NUMERIC(4, 3) DEFAULT 0,
                         offensive_rebounds NUMERIC(3, 1),
                         defensive_rebounds NUMERIC(3, 1),
                         total_rebounds NUMERIC(3, 1),
@@ -238,8 +279,56 @@ def create_tables(conn):
                         personal_fouls NUMERIC(3, 1),
                         points_per_game NUMERIC(3, 1),
                    
-                        CONSTRAINT fk_player FOREIGN KEY (player_id) REFERENCES players(player_id)
+                        CONSTRAINT fk_player FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
                     ); """)    
 
     conn.commit()
     cursor.close()
+
+
+def load_teams(conn):
+    cursor = conn.cursor()
+    with open('data/cleaned_teams_data.csv', 'r', encoding='utf-8') as f:
+        cursor.copy_expert("""
+                            COPY teams(name, record, wins, losses, conference_wins, conference_losses,
+                                       university, coach, conference, location, nickname)
+                            FROM STDIN WITH (FORMAT CSV, HEADER TRUE)
+                            """,
+                            f
+                            )
+    
+    conn.commit()
+    cursor.close()
+        
+
+def load_players(conn):
+    cursor = conn.cursor()
+    with open('data/cleaned_roster_data.csv', 'r', encoding='utf-8') as f:
+        cursor.copy_expert("""
+                            COPY players(name, jersey_number, class, position, height,
+                                         weight, hometown, high_school, team)
+                            FROM STDIN WITH (FORMAT CSV, HEADER TRUE)
+                            """,
+                            f
+                            )
+        
+    conn.commit()
+    cursor.close()
+
+
+def load_player_stats(conn):
+    cursor = conn.cursor()
+    with open('data/cleaned_stats_data.csv', 'r', encoding='utf-8') as f:
+        cursor.copy_expert("""
+                            COPY player_stats(player_id, games_played, games_started, minutes_played, field_goals, field_goals_attempted,
+                                              field_goal_percentage, three_points, three_points_attempted, three_point_percentage,
+                                              two_points, two_points_attempted, two_point_percentage, effective_field_goal_percentage,
+                                              free_throws, free_throws_attempted, free_throws_percentage, offensive_rebounds,
+                                              defensive_rebounds, total_rebounds, assists, steals, blocks, turnovers, personal_fouls, points_per_game)
+                            FROM STDIN WITH (FORMAT CSV, HEADER TRUE)
+                            """,
+                            f
+                            )
+        
+        conn.commit()
+        cursor.close()
