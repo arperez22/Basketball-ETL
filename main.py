@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import psycopg2
-from pipeline import run_pipeline
+from etl import run_pipeline
 
 
 def main():
