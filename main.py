@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import psycopg2
-from etl_basketball_data import run_etl_pipeline
+from pipeline import run_pipeline
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
         port=port
     )
 
-    run_etl_pipeline(conn)
+    run_pipeline(conn)
 
     conn.close()
 
