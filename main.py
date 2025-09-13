@@ -1,8 +1,7 @@
 import os
 from dotenv import load_dotenv
 import psycopg2
-from etl import run_pipeline
-from etl.migrations import link_players_to_teams
+from etl import run_pipeline, link_players_to_teams
 
 def main():
     load_dotenv()
