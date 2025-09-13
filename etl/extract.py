@@ -5,54 +5,8 @@ import pandas as pd
 
 
 def extract_data():
-    extract_sports_reference_data()
     extract_wiki_data()
-
-
-def extract_sports_reference_data():
-    team_roster_info = []
-    team_stats_info = []
-
-    url = 'https://www.sports-reference.com/cbb/postseason/men/2025-ncaa.html'
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'lxml')
-
-    divs = soup.find_all('div', {'class': 'team16'})
-    divs = ''.join(str(div) for div in divs)
-    div_soup = BeautifulSoup(divs, 'lxml')
-
-    tags = div_soup.find_all('a')
-
-    team_links_to_names = {tag.get('href'): tag.text.strip() for tag in tags if '/cbb/schools/' in tag.get('href')}
-    team_links_to_names = {f"https://www.sports-reference.com/{link}": name for link, name in team_links_to_names.items()}
-
-    team_links_to_names = dict(sorted(team_links_to_names.items(), key=lambda item: item[1]))
-
-    for team_url, team_name in team_links_to_names.items():
-        html = requests.get(team_url).text
-        soup = BeautifulSoup(html, 'lxml')
-
-        tables = soup.find_all('table')
-
-        roster_table = tables[0]
-        stats_table = tables[5]
-
-        roster_info = pd.read_html(str(roster_table))[0]
-        roster_info["Team"] = team_name
-        team_roster_info.append(roster_info)
-
-        stats_info = pd.read_html(str(stats_table))[0]
-        stats_info["Team"] = team_name
-        team_stats_info.append(stats_info)
-
-        print(f"Finished processing {team_name}!")
-        sleep(5)
-
-    roster_df = pd.concat(team_roster_info, ignore_index=True)
-    roster_df.to_csv('data/team_rosters.csv', index=False)
-
-    stats_df = pd.concat(team_stats_info, ignore_index=True)
-    stats_df.to_csv('data/team_stats.csv', index=False)
+    extract_sports_reference_data()
 
 
 def extract_wiki_data():
@@ -110,3 +64,49 @@ def extract_wiki_data():
 
     teams_df = pd.DataFrame(teams_data, columns=file_headers)
     teams_df.to_csv('data/teams_data.csv', index=False)
+
+
+def extract_sports_reference_data():
+    team_roster_info = []
+    team_stats_info = []
+
+    url = 'https://www.sports-reference.com/cbb/postseason/men/2025-ncaa.html'
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'lxml')
+
+    divs = soup.find_all('div', {'class': 'team16'})
+    divs = ''.join(str(div) for div in divs)
+    div_soup = BeautifulSoup(divs, 'lxml')
+
+    tags = div_soup.find_all('a')
+
+    team_links_to_names = {tag.get('href'): tag.text.strip() for tag in tags if '/cbb/schools/' in tag.get('href')}
+    team_links_to_names = {f"https://www.sports-reference.com/{link}": name for link, name in team_links_to_names.items()}
+
+    team_links_to_names = dict(sorted(team_links_to_names.items(), key=lambda item: item[1]))
+
+    for team_url, team_name in team_links_to_names.items():
+        html = requests.get(team_url).text
+        soup = BeautifulSoup(html, 'lxml')
+
+        tables = soup.find_all('table')
+
+        roster_table = tables[0]
+        stats_table = tables[5]
+
+        roster_info = pd.read_html(str(roster_table))[0]
+        roster_info["Team"] = team_name
+        team_roster_info.append(roster_info)
+
+        stats_info = pd.read_html(str(stats_table))[0]
+        stats_info["Team"] = team_name
+        team_stats_info.append(stats_info)
+
+        print(f"Finished processing {team_name}!")
+        sleep(5)
+
+    roster_df = pd.concat(team_roster_info, ignore_index=True)
+    roster_df.to_csv('data/team_rosters.csv', index=False)
+
+    stats_df = pd.concat(team_stats_info, ignore_index=True)
+    stats_df.to_csv('data/team_stats.csv', index=False)
